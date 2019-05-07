@@ -1,62 +1,96 @@
 import React from 'react';
-import { Platform, StatusBar, StyleSheet, View } from 'react-native';
-import { AppLoading, Asset, Font, Icon } from 'expo';
-import AppNavigator from './navigation/AppNavigator';
+import { ActivityIndicator, View, Text } from 'react-native';
+import { Permissions, Location } from 'expo'
 
 export default class App extends React.Component {
-  state = {
-    isLoadingComplete: false,
-  };
 
-  render() {
-    if (!this.state.isLoadingComplete && !this.props.skipLoadingScreen) {
-      return (
-        <AppLoading
-          startAsync={this._loadResourcesAsync}
-          onError={this._handleLoadingError}
-          onFinish={this._handleFinishLoading}
-        />
-      );
-    } else {
-      return (
-        <View style={styles.container}>
-          {Platform.OS === 'ios' && <StatusBar barStyle="default" />}
-          <AppNavigator />
-        </View>
-      );
+    constructor(props) {
+        super(props);
+        this.state = {
+            isLoading: true,
+            hasLocationPermissions: false,
+            locationResult: null,
+            stationDataSource: {},
+        }
     }
-  }
 
-  _loadResourcesAsync = async () => {
-    return Promise.all([
-      Asset.loadAsync([
-        require('./assets/images/robot-dev.png'),
-        require('./assets/images/robot-prod.png'),
-      ]),
-      Font.loadAsync({
-        // This is the font that we are using for our tab bar
-        ...Icon.Ionicons.font,
-        // We include SpaceMono because we use it in HomeScreen.js. Feel free
-        // to remove this if you are not using it in your app
-        'space-mono': require('./assets/fonts/SpaceMono-Regular.ttf'),
-      }),
-    ]);
-  };
+    async componentDidMount() {
+        await this._getLocationAsync();
+        await this._test()
+            .then((response) => response.json())
+            .then((responseJson) => {
+                this.setState({
+                    stationDataSource: responseJson
+                })
+            })
+            .then((nothing) => {
+                fetch(`http://133.186.208.249/api/concentrations?station=${this.state.stationDataSource.id}`)
+                    .then((response) => response.json())
+                    .then((responseJson) => {
+                        this.setState({
+                            isLoading: false,
+                            dataSource: responseJson,
+                        }, function () {
 
-  _handleLoadingError = error => {
-    // In this case, you might want to report the error to your error
-    // reporting service, for example Sentry
-    console.warn(error);
-  };
+                        });
+                    })
+                    .catch((error) => {
+                        console.error(error);
+                    });
+            })
+    }
 
-  _handleFinishLoading = () => {
-    this.setState({ isLoadingComplete: true });
-  };
+    _getLocationAsync = async () => {
+        let { status } = await Permissions.askAsync(Permissions.LOCATION);
+        if (status !== 'granted') {
+            this.setState({
+                locationResult: 'Permission to access location was denied',
+            });
+        } else {
+            this.setState({ hasLocationPermissions: true });
+        }
+
+        let location = await Location.getCurrentPositionAsync({});
+        this.setState({ locationResult: location });
+    }
+
+    _test = () => {
+        if (this.state.locationResult === null) {
+            return fetch('http://133.186.208.249/api/stations/140')
+        }
+        else {
+            return fetch(`http://133.186.208.249/api/stations?lon=${this.state.locationResult.coords.longitude}&lat=${this.state.locationResult.coords.latitude}`)
+        }
+    }
+
+    render() {
+        if (this.state.isLoading) {
+            return (
+                <View style={{ flex: 1, padding: 40 }}>
+                    <ActivityIndicator />
+                </View>
+            )
+        }
+
+        return (
+            <View style={{ flex: 1, paddingTop: 40 }}>
+                {
+                    this.state.locationResult === null ?
+                        <Text>Finding your current location...</Text> :
+                        this.state.hasLocationPermissions === false ?
+                            <Text>Location permissions are not granted.</Text> :
+                            <View>
+                                <Text>미세먼지 농도: {this.state.dataSource.fine_dust}</Text>
+                                <Text>미세먼지 등급: {this.state.dataSource.fine_dust_grade}</Text>
+                                <Text>초미세먼지 농도: {this.state.dataSource.ultra_fine_dust}</Text>
+                                <Text>초미세먼지 등급: {this.state.dataSource.ultra_fine_dust_grade}</Text>
+                                <Text>측정 시간 : {this.state.dataSource.data_time}</Text>
+                                <Text>측정소 이름: {this.state.stationDataSource.name}</Text>
+                                <Text>측정소 주소: {this.state.stationDataSource.address}</Text>
+                                {this.state.stationDataSource.distance ? <Text>측정소와의 거리: {this.state.stationDataSource.distance}km</Text>: <Text>측정소와의 거리: GPS를 허락하세요. </Text> }
+                            </View>
+                }
+            </View>
+        );
+    }
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-});
